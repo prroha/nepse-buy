@@ -23,6 +23,9 @@ class _BrokerInboxScreenState extends ConsumerState<BrokerInboxScreen> {
   bool _scanning = false;
   String? _scanError;
 
+  /// Tries to scan the device inbox. Builds without the SMS plugin
+  /// surface this via `SmsScanningDisabled` — we catch it and render
+  /// the disabled-state copy.
   Future<void> _scan() async {
     setState(() {
       _scanning = true;
@@ -39,12 +42,10 @@ class _BrokerInboxScreenState extends ConsumerState<BrokerInboxScreen> {
               : 'Found $queued new broker message${queued == 1 ? '' : 's'}.'),
         ),
       );
-      // Trigger a rebuild of the list.
       ref.invalidate(_pendingMessagesProvider);
-    } on SmsPermissionDenied {
+    } on SmsScanningDisabled catch (e) {
       if (!mounted) return;
-      setState(() => _scanError =
-          'SMS permission denied. Grant it in system settings to scan broker confirmations.');
+      setState(() => _scanError = e.toString());
     } catch (e) {
       if (!mounted) return;
       setState(() => _scanError = 'Scan failed: $e');
@@ -84,20 +85,27 @@ class _BrokerInboxScreenState extends ConsumerState<BrokerInboxScreen> {
   @override
   Widget build(BuildContext context) {
     final pending = ref.watch(_pendingMessagesProvider);
+    final scannerAsync = ref.watch(smsScannerServiceProvider);
+    final scanAvailable = scannerAsync.maybeWhen(
+      data: (s) => s.isAvailable,
+      orElse: () => false,
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Broker messages'),
         actions: [
-          IconButton(
-            tooltip: 'Scan SMS inbox',
-            icon: _scanning
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync),
-            onPressed: _scanning ? null : _scan,
-          ),
+          if (scanAvailable)
+            IconButton(
+              tooltip: 'Scan SMS inbox',
+              icon: _scanning
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.sync),
+              onPressed: _scanning ? null : _scan,
+            ),
         ],
       ),
       body: Column(
@@ -117,12 +125,16 @@ class _BrokerInboxScreenState extends ConsumerState<BrokerInboxScreen> {
               error: (e, _) => Center(child: Text('Failed: $e')),
               data: (items) {
                 if (items.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(24),
                       child: Text(
-                        'No pending broker messages. Tap the sync button '
-                        'to scan your SMS inbox.',
+                        scanAvailable
+                            ? 'No pending broker messages. Tap the sync '
+                                'button to scan your SMS inbox.'
+                            : 'No pending broker messages. Auto-scan from '
+                                'SMS is disabled in this build — log trades '
+                                'manually from Portfolio → Log purchase.',
                         textAlign: TextAlign.center,
                       ),
                     ),

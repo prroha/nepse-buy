@@ -58,11 +58,13 @@ dependencies:
   local_auth: ^2.2.0
   crypto: ^3.0.3
 
-  # Local notifications (v0.10 — daily signal pings) + SMS parsing
+  # Local notifications (v0.10 — daily signal pings)
   flutter_local_notifications: ^17.2.3
   timezone: ^0.9.4
-  another_telephony: ^0.4.1
-  permission_handler: ^11.3.1
+  # SMS auto-scan is disabled in v0.10.1 — READ_SMS triggers Play Protect.
+  # The pure parser is still used (paste-SMS could surface later).
+  # another_telephony: ^0.4.1
+  # permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
