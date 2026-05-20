@@ -1,0 +1,125 @@
+# Development Docker Compose with Hot Reload
+# Usage: docker compose -f docker-compose.dev.yml up
+
+services:
+  # ==========================================================================
+  # PostgreSQL Database (Development)
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: nepse-buy-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localpass
+      POSTGRES_DB: nepse_buy_dev
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nepse_buy_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Redis (BullMQ queue backend + cache)
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: nepse-buy-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================================================
+  # Backend API (Development with Hot Reload)
+  # ==========================================================================
+  backend:
+    image: node:20-alpine
+    container_name: nepse-buy-backend-dev
+    working_dir: /app
+    user: "${UID:-1000}:${GID:-1000}"
+    command: sh -c "npm install && npx prisma generate && npx prisma migrate dev --name init --skip-seed 2>/dev/null || true && npm run dev"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:localpass@postgres:5432/nepse_buy_dev?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-secret-change-in-production-min-32-chars
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: http://localhost:3000
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-signals@nepse-buy.local}
+      SCRAPER_USER_AGENT: ${SCRAPER_USER_AGENT:-nepse-buy/0.1-dev}
+      SCHEDULE_CRON_DAILY: ${SCHEDULE_CRON_DAILY:-0 16 * * 0-4}
+      SCHEDULE_TZ: ${SCHEDULE_TZ:-Asia/Kathmandu}
+    volumes:
+      - ./core/backend:/app
+      - backend_node_modules:/app/node_modules
+    ports:
+      - "3001:3001"
+    networks:
+      - dev-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+
+  # ==========================================================================
+  # pgAdmin (Optional - Database GUI)
+  # ==========================================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: nepse-buy-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    networks:
+      - dev-network
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  dev-network:
+    driver: bridge
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  postgres_data_dev:
+    driver: local
+  redis_data_dev:
+    driver: local
+  backend_node_modules:
+    driver: local
+  pgadmin_data:
+    driver: local

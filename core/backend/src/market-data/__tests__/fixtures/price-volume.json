@@ -1,0 +1,35 @@
+[
+  {
+    "securityId": "131",
+    "securityName": "Nabil Bank Limited",
+    "symbol": "NABIL",
+    "indexId": 58,
+    "totalTradeQuantity": 41228,
+    "lastTradedPrice": 526,
+    "percentageChange": 0,
+    "previousClose": 526,
+    "closePrice": 526
+  },
+  {
+    "securityId": "187",
+    "securityName": "Nepal Life Insurance Co. Ltd.",
+    "symbol": "NLIC",
+    "indexId": 58,
+    "totalTradeQuantity": 9878,
+    "lastTradedPrice": 761.5,
+    "percentageChange": -0.405440753,
+    "previousClose": 764.6,
+    "closePrice": 761.5
+  },
+  {
+    "securityId": "3946",
+    "securityName": "CEDB Holdings Limited",
+    "symbol": "CHDC",
+    "indexId": 58,
+    "totalTradeQuantity": 10681,
+    "lastTradedPrice": 2257,
+    "percentageChange": 0.217574708,
+    "previousClose": 2252.1,
+    "closePrice": 2257
+  }
+]

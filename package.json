@@ -1,0 +1,37 @@
+{
+  "name": "nepse-buy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NEPSE DCA signal app — Fastify + Prisma backend and Flutter mobile",
+  "scripts": {
+    "prepare": "node -e \"try { require.resolve('husky') } catch (e) { process.exit(0) }\" && husky || true",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev:backend": "npm run dev --workspace=core/backend",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up",
+    "docker:dev:build": "docker compose -f docker-compose.dev.yml up --build",
+    "docker:prod": "docker compose up -d",
+    "docker:prod:build": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "workspaces": [
+    "core/backend",
+    "shared/backend-utils"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.8.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "npm@10.0.0"
+}

@@ -1,0 +1,40 @@
+{
+  "content": [
+    {
+      "businessDate": "2026-05-18",
+      "totalTrades": 463,
+      "totalTradedQuantity": 44305,
+      "totalTradedValue": 23313421.6,
+      "highPrice": 532,
+      "lowPrice": 525,
+      "closePrice": 526
+    },
+    {
+      "businessDate": "2026-05-15",
+      "totalTrades": 281,
+      "totalTradedQuantity": 19872,
+      "totalTradedValue": 10422183,
+      "highPrice": 530,
+      "lowPrice": 522,
+      "closePrice": 524.5
+    },
+    {
+      "businessDate": "2026-05-14",
+      "totalTrades": 312,
+      "totalTradedQuantity": 25104,
+      "totalTradedValue": 13165320,
+      "highPrice": 528,
+      "lowPrice": 521,
+      "closePrice": 523
+    }
+  ],
+  "pageable": { "pageNumber": 0, "pageSize": 500 },
+  "last": true,
+  "totalPages": 1,
+  "totalElements": 3,
+  "size": 500,
+  "number": 0,
+  "first": true,
+  "numberOfElements": 3,
+  "empty": false
+}

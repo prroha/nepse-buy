@@ -1,0 +1,77 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  errors:
+    unused_import: error
+    unused_local_variable: error
+    unused_element: warning
+    dead_code: warning
+    invalid_annotation_target: ignore
+
+linter:
+  rules:
+    # Error prevention
+    - avoid_print
+    - avoid_empty_else
+    - avoid_relative_lib_imports
+    - avoid_returning_null_for_future
+    - avoid_slow_async_io
+    - avoid_types_as_parameter_names
+    - cancel_subscriptions
+    - close_sinks
+    - empty_statements
+    - hash_and_equals
+    - no_duplicate_case_values
+    - prefer_void_to_null
+    - unnecessary_statements
+
+    # Unused code detection
+    - unused_import
+    - unused_local_variable
+    - unused_element
+    - unreachable_from_main
+
+    # Style
+    - always_declare_return_types
+    - annotate_overrides
+    - avoid_init_to_null
+    - avoid_null_checks_in_equality_operators
+    - avoid_return_types_on_setters
+    - await_only_futures
+    - camel_case_types
+    - constant_identifier_names
+    - empty_catches
+    - empty_constructor_bodies
+    - library_names
+    - library_prefixes
+    - no_leading_underscores_for_local_identifiers
+    - non_constant_identifier_names
+    - null_closures
+    - prefer_adjacent_string_concatenation
+    - prefer_collection_literals
+    - prefer_conditional_assignment
+    - prefer_const_constructors
+    - prefer_const_constructors_in_immutables
+    - prefer_const_declarations
+    - prefer_contains
+    - prefer_final_fields
+    - prefer_final_locals
+    - prefer_for_elements_to_map_fromIterable
+    - prefer_if_null_operators
+    - prefer_is_empty
+    - prefer_is_not_empty
+    - prefer_single_quotes
+    - prefer_spread_collections
+    - recursive_getters
+    - slash_for_doc_comments
+    - type_init_formals
+    - unnecessary_brace_in_string_interps
+    - unnecessary_const
+    - unnecessary_new
+    - unnecessary_null_in_if_null_operators
+    - unnecessary_this
+    - use_function_type_syntax_for_parameters
+    - use_rethrow_when_possible

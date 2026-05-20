@@ -1,0 +1,23 @@
+[
+  {
+    "id": 131,
+    "symbol": "NABIL",
+    "securityName": "Nabil Bank Limited",
+    "name": "(NABIL) Nabil Bank Limited",
+    "activeStatus": "A"
+  },
+  {
+    "id": 187,
+    "symbol": "NLIC",
+    "securityName": "Nepal Life Insurance Co. Ltd.",
+    "name": "(NLIC) Nepal Life Insurance Co. Ltd.",
+    "activeStatus": "A"
+  },
+  {
+    "id": 3946,
+    "symbol": "CHDC",
+    "securityName": "CEDB Holdings Limited",
+    "name": "(CHDC) CEDB Holdings Limited",
+    "activeStatus": "A"
+  }
+]

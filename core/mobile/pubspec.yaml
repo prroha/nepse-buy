@@ -1,0 +1,76 @@
+name: nepse_buy
+description: NEPSE DCA signal app — Flutter + Riverpod + Clean Architecture
+
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.4.9
+
+  # Networking
+  dio: ^5.4.0
+  uuid: ^4.3.3
+
+  # Storage
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.2
+
+  # Navigation
+  go_router: ^13.1.0
+
+  # Functional Programming
+  dartz: ^0.10.1
+
+  # Code Generation
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
+
+  # UI
+  cupertino_icons: ^1.0.6
+  fl_chart: ^0.69.0
+  intl: ^0.19.0
+
+  # Image Picker (BSD License)
+  image_picker: ^1.0.7
+
+  # File System & Sharing (MIT/BSD License)
+  path_provider: ^2.1.2
+  share_plus: ^7.2.2
+  file_picker: ^8.0.0
+
+  # Offline cache + outbox (v0.6)
+  sqflite: ^2.3.3
+  connectivity_plus: ^6.0.5
+
+  # Utilities
+  package_info_plus: ^8.0.0
+  url_launcher: ^6.2.5
+  path: ^1.9.0
+
+  # App lock (v0.9 phase 5)
+  local_auth: ^2.2.0
+  crypto: ^3.0.3
+
+  # Local notifications (v0.10 — daily signal pings) + SMS parsing
+  flutter_local_notifications: ^17.2.3
+  timezone: ^0.9.4
+  another_telephony: ^0.4.1
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.8
+  freezed: ^2.4.6
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true

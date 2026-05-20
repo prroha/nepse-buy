@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "initialized": true,
+  "projectName": "nepse-buy",
+  "projectType": "full-stack",
+  "stack": {
+    "language": "typescript",
+    "framework": "express",
+    "styling": null,
+    "testing": "jest",
+    "packageManager": "npm",
+    "database": "postgresql",
+    "orm": "prisma"
+  },
+  "mobile": {
+    "language": "dart",
+    "framework": "flutter",
+    "stateManagement": "riverpod",
+    "testing": "flutter_test"
+  },
+  "infrastructure": {
+    "jobQueue": "bullmq",
+    "cache": "redis",
+    "email": "resend",
+    "containerization": "docker-compose"
+  },
+  "capabilities": {
+    "hasUI": true,
+    "hasAPI": true,
+    "hasDatabase": true,
+    "hasAuth": true,
+    "hasTests": true
+  },
+  "relevantRules": [
+    "anti-hallucination.md",
+    "clean-code.md",
+    "coding-standards.md",
+    "ui-ux-design.md"
+  ],
+  "relevantSkills": [
+    "init",
+    "add",
+    "fix",
+    "refactor",
+    "pattern",
+    "review",
+    "revisit",
+    "test",
+    "index",
+    "help",
+    "ui",
+    "scaffold",
+    "security"
+  ],
+  "detectedAt": "2026-05-19T00:00:00Z",
+  "userConfirmed": true,
+  "activeStacks": ["node-express", "flutter"]
+}

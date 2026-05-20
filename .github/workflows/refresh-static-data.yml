@@ -1,0 +1,142 @@
+name: Refresh static data
+
+# Manual-only refresh of the JSON bundle the mobile app consumes.
+# Postgres + Redis run as ephemeral service containers — they exist only
+# for the duration of the job. The committed JSON in `data/` is the
+# canonical store between runs.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run"
+        type: choice
+        required: true
+        default: "export-only"
+        options:
+          - export-only
+          - scrape-dividends
+          - scrape-prices
+          - scrape-all
+      scope:
+        description: "Stock scope (only applies to scrape-* actions)"
+        type: choice
+        required: true
+        default: "curated"
+        options:
+          - curated
+          - watchlisted
+          - all
+      price_years:
+        description: "Years of price history to backfill (scrape-prices / scrape-all)"
+        type: string
+        required: false
+        default: "4"
+      commit_message:
+        description: "Custom commit message (optional)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nepse
+          POSTGRES_PASSWORD: nepse
+          POSTGRES_DB: nepse_buy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nepse"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://nepse:nepse@localhost:5432/nepse_buy
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: production
+      SMOKE_INSECURE: "1"
+
+    defaults:
+      run:
+        working-directory: core/backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: core/backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (only when scraping fundamentals)
+        if: ${{ inputs.action == 'scrape-all' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate Prisma client + migrate
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Seed (curated universe + system settings)
+        run: npm run db:seed:prod
+
+      - name: Scrape dividends (ShareSansar)
+        if: ${{ inputs.action == 'scrape-dividends' || inputs.action == 'scrape-all' }}
+        run: npx tsx scripts/scrape-dividends.ts --${{ inputs.scope }} --force
+
+      - name: Scrape prices (nepalstock.com.np)
+        if: ${{ inputs.action == 'scrape-prices' || inputs.action == 'scrape-all' }}
+        run: npx tsx scripts/backfill-curated.ts --years ${{ inputs.price_years }}
+
+      - name: Export JSON bundle
+        run: npx tsx scripts/export-static-data.ts --out ../../data
+
+      - name: Show export summary
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "Manifest:"
+          cat data/manifest.json
+          echo
+          echo "Files:"
+          find data -type f -name "*.json" | sort | head -30
+
+      - name: Commit JSON updates
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No JSON changes to commit."
+            exit 0
+          fi
+          MSG="${{ inputs.commit_message }}"
+          if [ -z "$MSG" ]; then
+            MSG="chore(data): refresh — action=${{ inputs.action }} scope=${{ inputs.scope }}"
+          fi
+          git commit -m "$MSG"
+          git push

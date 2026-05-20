@@ -1,0 +1,620 @@
+// nepse-buy Prisma schema
+// Conventions:
+// - All ids are UUIDs (never expose internal sequential ids — DB rule)
+// - Observation tables are append-only: never UPDATE/DELETE, always INSERT
+// - Money: Decimal(14,2) for prices (NPR with paisa), Decimal(16,2) for amounts, Decimal(20,2) for market cap
+// - Time: store UTC; convert to Asia/Kathmandu (NPT, UTC+5:45) at edges
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  SYSTEM
+  SIGNAL
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  PASSWORD_CHANGE
+  PASSWORD_RESET
+  EMAIL_VERIFY
+  ADMIN_ACTION
+}
+
+/// Where an observation came from. Append-only ingestion tags every row.
+enum DataSource {
+  NEPALSTOCK
+  NEPSE_ALPHA
+  MEROLAGANI
+  SHARESANSAR
+  MANUAL
+}
+
+/// Signal action emitted by the engine for a (user, stock, date).
+/// HOLD_FUNDS added in v0.2; HARVEST in v0.4 (paper P/L ≥ 30% on a Position).
+enum SignalAction {
+  BUY
+  WAIT
+  SKIP
+  HOLD_FUNDS
+  HARVEST
+}
+
+/// Seasonal classification per NEPSE month.
+enum Season {
+  WEAK    // March, June, November (per user strategy)
+  NORMAL
+  STRONG  // July (Shrawan)
+}
+
+/// Channel a notification was delivered through. Email + in-app for v1.
+enum DeliveryChannel {
+  EMAIL
+  IN_APP
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+/// Lifecycle of a stock on NEPSE — affects whether we ingest/signal.
+enum StockStatus {
+  ACTIVE
+  DELISTED
+  SUSPENDED
+}
+
+/// Strategic tier of a stock (engine v0.3+). Cash-printer tier = low-float,
+/// high-ROE names the engine targets for weekly DCA deploys.
+enum StockTier {
+  LOW_FLOAT_CASH_PRINTER
+  STANDARD
+}
+
+// ============================================================================
+// AUTH / USERS  (inherited from fullstack-starter, kept as-is)
+// ============================================================================
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  name          String?
+  avatarUrl     String?  @map("avatar_url")
+  role          UserRole @default(USER)
+  isActive      Boolean  @default(true) @map("is_active")
+  emailVerified Boolean  @default(false) @map("email_verified")
+
+  // OAuth support (optional)
+  googleId     String? @unique @map("google_id")
+  authProvider String  @default("email") @map("auth_provider")
+
+  // Session management
+  activeDeviceId String? @map("active_device_id")
+
+  // Account lockout
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  lastFailedLogin     DateTime? @map("last_failed_login")
+
+  // Notification preferences
+  emailOptIn          Boolean @default(true) @map("email_opt_in")
+  emailDigestFrequency String @default("daily") @map("email_digest_frequency") // daily | weekly | off
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  sessions                Session[]
+  auditLogs               AuditLog[]
+  notifications           Notification[]
+  watchlistItems          WatchlistItem[]
+  dailySignals            DailySignal[]
+  notificationDeliveries  NotificationDelivery[]
+  debtAccounts            DebtAccount[]
+  positions               Position[]
+  feeSchedule             FeeSchedule?
+
+  @@index([email])
+  @@index([googleId])
+  @@map("users")
+}
+
+// ============================================================================
+// SYSTEM SETTINGS (v0.6) — admin-controlled runtime flags
+// ============================================================================
+
+/// Singleton config. Exactly one row with id="singleton". Use the helper
+/// service to read/upsert; never query by other ids.
+model SystemSettings {
+  id                  String   @id @default("singleton")
+  /// When true, POST /auth/anon returns 403 and new users must register.
+  /// Default false → app is usable without ever logging in.
+  requireRegistration Boolean  @default(false) @map("require_registration")
+  /// Optional UI banner asking anonymous users to claim their account.
+  showClaimBanner     Boolean  @default(false) @map("show_claim_banner")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+// ============================================================================
+// SCRAPE LOG (v0.9) — staleness gates so we don't re-scrape what we already have
+// ============================================================================
+
+/// One row per (source, symbol, scope) — the scrape services check
+/// `lastSuccess` against the per-scope staleness threshold and skip the
+/// network call when a recent success exists. Bypass with `force: true`.
+///
+/// Scopes used:
+///   - `dividend-history`     (ShareSansar — 90 day staleness)
+///   - `fundamentals-medians` (NEPSE Alpha — 90 day staleness)
+///   - `fundamentals-current` (Mero Lagani — 1 day staleness)
+///   - `prices-incremental`   (nepalstock.com.np history — 1 day staleness)
+model ScrapeLog {
+  id           String     @id @default(uuid())
+  source       DataSource
+  symbol       String
+  scope        String
+  lastAttempt  DateTime   @map("last_attempt")
+  lastSuccess  DateTime?  @map("last_success")
+  /// Rows ingested on the last successful run.
+  recordCount  Int        @default(0) @map("record_count")
+  lastError    String?    @map("last_error") @db.Text
+
+  @@unique([source, symbol, scope])
+  @@index([source, scope, lastAttempt])
+  @@map("scrape_logs")
+}
+
+// ============================================================================
+// POSITIONS & PURCHASES (v0.4) — user-logged buys for paper-P/L tracking
+// ============================================================================
+
+/// One Position per (user, stock). Aggregates all purchases the user has logged.
+/// v0.7 — Position is now a derived aggregate of Trades.
+/// `totalShares` and `avgNetCost` are recomputed by `positionService.recompute`
+/// after every Trade write. `realizedPnl` accumulates from matched SELL trades.
+model Position {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  stockId       String   @map("stock_id")
+  /// Net shares held = sum(BUY.shares) - sum(SELL.shares).
+  totalShares   Int      @default(0) @map("total_shares")
+  /// Weighted-average NET cost per share (includes broker + SEBON + DP fees),
+  /// computed over the FIFO-remaining BUY trades.
+  avgNetCost    Decimal  @default(0) @map("avg_net_cost") @db.Decimal(14, 4)
+  /// Cumulative realized P/L from SELL trades, after fees + CGT. NPR.
+  realizedPnl   Decimal  @default(0) @map("realized_pnl") @db.Decimal(16, 2)
+  /// True only when totalShares > 0. Soft-close on full exit so we keep history.
+  isOpen        Boolean  @default(true) @map("is_open")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock  Stock   @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  trades Trade[]
+
+  @@unique([userId, stockId])
+  @@index([userId, isOpen])
+  @@map("positions")
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+/// Single buy or sell. BUY trades have full original shares; FIFO matching is
+/// done in-memory by `positionService.recompute`. `netPricePerShare` reflects
+/// the user's actual effective price including all fees.
+model Trade {
+  id                  String    @id @default(uuid())
+  positionId          String    @map("position_id")
+  side                TradeSide
+  shares              Int
+  /// What the broker prints — gross, before fees.
+  grossPricePerShare  Decimal   @map("gross_price_per_share") @db.Decimal(14, 4)
+  executedAt          DateTime  @map("executed_at")
+  /// Auto-computed at create-time from the user's FeeSchedule; editable.
+  brokerCommission    Decimal   @map("broker_commission") @db.Decimal(14, 2)
+  sebonFee            Decimal   @map("sebon_fee") @db.Decimal(14, 2)
+  dpFee               Decimal   @map("dp_fee") @db.Decimal(14, 2)
+  /// Only for SELL — capital-gains tax over realized profit per FIFO match.
+  cgt                 Decimal?  @map("cgt") @db.Decimal(14, 2)
+  /// Misc adjustments (free-form correction). Default 0.
+  otherAdjustments    Decimal   @default(0) @map("other_adjustments") @db.Decimal(14, 2)
+  /// Final effective price per share. For BUY = gross + total_fees/shares.
+  /// For SELL = gross - total_fees/shares - cgt/shares.
+  netPricePerShare    Decimal   @map("net_price_per_share") @db.Decimal(14, 4)
+  note                String?
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  position Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  @@index([positionId, executedAt])
+  @@index([positionId, side])
+  @@map("trades")
+}
+
+/// Per-user broker-fee + tax overrides. Always exactly one row per user;
+/// `feeScheduleService.getOrSeed` materializes the default on first access.
+model FeeSchedule {
+  id                    String   @id @default(uuid())
+  userId                String   @unique @map("user_id")
+  /// Brokerage commission slabs as JSON. Each slab: { upTo: number, ratePct: number }.
+  /// Last slab's upTo is null (open-ended). Defaults reflect NEPSE 2024+ rates.
+  brokerageSlabs        Json     @map("brokerage_slabs")
+  sebonRatePct          Decimal  @default(0.015) @map("sebon_rate_pct") @db.Decimal(6, 4)
+  dpFlatFee             Decimal  @default(25) @map("dp_flat_fee") @db.Decimal(8, 2)
+  cgtShortTermPct       Decimal  @default(7.5) @map("cgt_short_term_pct") @db.Decimal(6, 3)
+  cgtLongTermPct        Decimal  @default(5) @map("cgt_long_term_pct") @db.Decimal(6, 3)
+  longTermDaysThreshold Int      @default(365) @map("long_term_days_threshold")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("fee_schedules")
+}
+
+// ============================================================================
+// DEBT ACCOUNTS (v0.3) — user's overdraft/loan tracking for the STRONG-season sweep
+// ============================================================================
+
+/// User-tracked debt account (typically an overdraft loan). When the engine
+/// emits HOLD_FUNDS in strong-season months, it uses the user's debt accounts
+/// to quantify interest savings from diverting the monthly surplus.
+model DebtAccount {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  name         String   // e.g., "15L OD Loan"
+  balance      Decimal  @db.Decimal(16, 2) // outstanding in NPR
+  interestRate Decimal  @map("interest_rate") @db.Decimal(6, 3) // annual % e.g. 11.000
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@map("debt_accounts")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+model Session {
+  id               String   @id @default(uuid())
+  visibleId        String   @unique @default(uuid()) @map("visible_id")
+  userId           String   @map("user_id")
+  refreshTokenHash String   @map("refresh_token_hash")
+  ipAddress        String?  @map("ip_address")
+  userAgent        String?  @map("user_agent")
+  deviceName       String?  @map("device_name")
+  browser          String?
+  os               String?
+  lastActiveAt     DateTime @default(now()) @map("last_active_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  expiresAt        DateTime @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  userId    String?     @map("user_id")
+  action    AuditAction
+  entity    String
+  entityId  String?     @map("entity_id")
+  changes   Json?
+  ipAddress String?     @map("ip_address")
+  userAgent String?     @map("user_agent")
+  metadata  Json?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// In-app notification feed (read state, dismissal).
+/// Pairs with NotificationDelivery for cross-channel audit.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType @default(INFO)
+  title     String
+  message   String
+  data      Json?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================================================
+// MARKET — STOCK REGISTRY
+// ============================================================================
+
+/// NEPSE-listed instrument. Public identifier is `symbol`.
+model Stock {
+  id        String      @id @default(uuid())
+  symbol    String      @unique // e.g., "NABIL"
+  name      String                // e.g., "Nabil Bank Limited"
+  sector    String?               // e.g., "Commercial Banks"
+  status    StockStatus @default(ACTIVE)
+  /// Strategic tier — engine v0.3+ ranks cash-printers higher in WEAK months.
+  tier      StockTier   @default(STANDARD)
+  /// True if seeded as part of the curated default watchlist for new users.
+  isCurated Boolean     @default(false) @map("is_curated")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  priceObservations         PriceObservation[]
+  fundamentalsObservations  FundamentalsObservation[]
+  watchlistItems            WatchlistItem[]
+  dailySignals              DailySignal[]
+  positions                 Position[]
+  corporateActions          CorporateAction[]
+
+  @@index([symbol])
+  @@index([status])
+  @@index([isCurated])
+  @@index([tier])
+  @@map("stocks")
+}
+
+/// Per-stock corporate action history (v0.8). Drives both the dividend-yield
+/// screener (3-year totals) and position cost-basis adjustment (bonus + right
+/// shares dilute avgNetCost; cash dividends don't).
+enum CorporateActionType {
+  CASH_DIVIDEND
+  BONUS_SHARE
+  RIGHT_SHARE
+  STOCK_SPLIT
+}
+
+model CorporateAction {
+  id           String              @id @default(uuid())
+  stockId      String              @map("stock_id")
+  type         CorporateActionType
+  /// Percent for CASH_DIVIDEND / BONUS_SHARE (e.g., 12.5 = 12.5%).
+  /// Decimal precision keeps small fractional bonuses safe.
+  pct          Decimal?            @db.Decimal(8, 4)
+  /// Right-share ratio expressed as the "give X, receive Y" string, e.g., "1:5".
+  rightRatio   String?             @map("right_ratio")
+  /// Fiscal year of the declaration (e.g., "081-082"). NEPSE FY labels.
+  fiscalYear   String?             @map("fiscal_year")
+  /// Book-close / record date — the effective date the action applies.
+  recordDate   DateTime?           @map("record_date")
+  /// When announced / scraped.
+  announcedAt  DateTime            @map("announced_at")
+  source       DataSource
+  fetchedAt    DateTime            @default(now()) @map("fetched_at")
+  raw          Json?
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([stockId, type, fiscalYear])
+  @@index([stockId, type])
+  @@index([stockId, recordDate])
+  @@map("corporate_actions")
+}
+
+// ============================================================================
+// MARKET — APPEND-ONLY OBSERVATIONS
+// Never UPDATE/DELETE these. Every scrape inserts new rows tagged with source + fetched_at.
+// ============================================================================
+
+/// Daily OHLC + volume from a given source. Multiple sources for the same
+/// (stock, tradeDate) are allowed; reads pick most recent per source.
+model PriceObservation {
+  id         String     @id @default(uuid())
+  stockId    String     @map("stock_id")
+  tradeDate  DateTime   @map("trade_date") @db.Date
+  open       Decimal    @db.Decimal(14, 2)
+  high       Decimal    @db.Decimal(14, 2)
+  low        Decimal    @db.Decimal(14, 2)
+  close      Decimal    @db.Decimal(14, 2)
+  volume     BigInt     @default(0)
+  source     DataSource
+  fetchedAt  DateTime   @default(now()) @map("fetched_at")
+  /// Raw scrape payload — useful when diagnosing parser drift.
+  raw        Json?
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId, tradeDate])
+  @@index([stockId, source, fetchedAt])
+  @@index([tradeDate])
+  @@map("price_observations")
+}
+
+/// Per-stock fundamentals snapshot from a given source.
+/// P/E and P/B medians (3-5yr) are derived from this table on the fly.
+model FundamentalsObservation {
+  id          String     @id @default(uuid())
+  stockId     String     @map("stock_id")
+  observedAt  DateTime   @map("observed_at")
+  pe          Decimal?   @db.Decimal(10, 2)
+  pb          Decimal?   @db.Decimal(10, 2)
+  eps         Decimal?   @db.Decimal(14, 4)
+  bookValue   Decimal?   @map("book_value") @db.Decimal(14, 4)
+  marketCap   Decimal?   @map("market_cap") @db.Decimal(20, 2)
+  /// 3-5 year average P/E from NEPSE Alpha (v0.5+). Null when scraped from
+  /// Mero Lagani (snapshot-only) — engine prefers NEPSE-Alpha observations
+  /// when looking up median for the valuation gate.
+  peMedian5y  Decimal?   @map("pe_median_5y") @db.Decimal(10, 2)
+  pbMedian5y  Decimal?   @map("pb_median_5y") @db.Decimal(10, 2)
+  /// v0.8 — Nepali-context ratios used by the Discover screener.
+  /// `dividendYieldPct` is the trailing-year cash-dividend yield as a percent.
+  dividendYieldPct Decimal? @map("dividend_yield_pct") @db.Decimal(6, 2)
+  roeTtm          Decimal? @map("roe_ttm") @db.Decimal(6, 2)
+  roaTtm          Decimal? @map("roa_ttm") @db.Decimal(6, 2)
+  netMarginTtm    Decimal? @map("net_margin_ttm") @db.Decimal(6, 2)
+  /// Most recent quarter's EPS-TTM YoY change as a percent (e.g., 14.74).
+  epsTtmYoyPct    Decimal? @map("eps_ttm_yoy_pct") @db.Decimal(8, 2)
+  source      DataSource
+  fetchedAt   DateTime   @default(now()) @map("fetched_at")
+  /// Parser confidence 0..1; below threshold should alert.
+  parseConfidence Decimal? @map("parse_confidence") @db.Decimal(5, 4)
+  raw         Json?
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId, observedAt])
+  @@index([stockId, source, fetchedAt])
+  @@map("fundamentals_observations")
+}
+
+// ============================================================================
+// USER WATCHLIST
+// ============================================================================
+
+/// Per-user pinned stocks. New users are auto-seeded from curated stocks.
+model WatchlistItem {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  stockId   String   @map("stock_id")
+  /// Used for ordering in the UI.
+  rank      Int      @default(0)
+  /// Allows user to disable notifications for one stock without removing it.
+  alertsEnabled Boolean @default(true) @map("alerts_enabled")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stockId])
+  @@index([userId])
+  @@index([stockId])
+  @@map("watchlist_items")
+}
+
+// ============================================================================
+// SIGNAL ENGINE OUTPUT
+// ============================================================================
+
+/// One signal per (user, stock, signalDate). Engine writes the inputs it used
+/// into `inputsSnapshot` for full audit replay.
+model DailySignal {
+  id                  String       @id @default(uuid())
+  userId              String       @map("user_id")
+  stockId             String       @map("stock_id")
+  signalDate          DateTime     @map("signal_date") @db.Date
+  action              SignalAction
+  season              Season
+  /// Suggested limit-order price in NPR (Decimal). Null when action != BUY.
+  suggestedLimit      Decimal?     @map("suggested_limit") @db.Decimal(14, 2)
+  rationale           String       @db.Text
+  /// JSON snapshot of inputs used: current_price, ma20, pe, pe_median_5y, pb, pb_median_5y, etc.
+  inputsSnapshot      Json         @map("inputs_snapshot")
+  /// Engine version that produced this signal (semver of signal module).
+  engineVersion       String       @map("engine_version")
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stockId, signalDate])
+  @@index([userId, signalDate])
+  @@index([stockId, signalDate])
+  @@map("daily_signals")
+}
+
+// ============================================================================
+// NOTIFICATION DELIVERY AUDIT
+// Tracks every email/in-app push of a signal so we can dedup and audit.
+// ============================================================================
+
+model NotificationDelivery {
+  id          String          @id @default(uuid())
+  userId      String          @map("user_id")
+  /// Optional — null for non-signal notifications (e.g., welcome email).
+  signalId    String?         @map("signal_id")
+  channel     DeliveryChannel
+  status      DeliveryStatus  @default(PENDING)
+  /// Provider message id (Resend) when available.
+  providerId  String?         @map("provider_id")
+  error       String?         @db.Text
+  sentAt      DateTime?       @map("sent_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([signalId])
+  @@index([status])
+  @@map("notification_deliveries")
+}
