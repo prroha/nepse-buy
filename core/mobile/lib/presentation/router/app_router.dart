@@ -32,31 +32,12 @@ import 'routes.dart';
 
 /// GoRouter provider for navigation
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
-
+  // Post-pivot: no auth gating. The login/register/forgot-password routes
+  // are kept in the table for cold-storage but no redirect points there;
+  // every screen is reachable without a session.
   return GoRouter(
     initialLocation: Routes.home,
     debugLogDiagnostics: true,
-    redirect: (context, state) {
-      final isAuthenticated = authState.isAuthenticated;
-      final isAuthRoute = state.matchedLocation == Routes.login ||
-          state.matchedLocation == Routes.register ||
-          state.matchedLocation == Routes.forgotPassword ||
-          state.matchedLocation.startsWith(Routes.resetPassword) ||
-          state.matchedLocation.startsWith(Routes.verifyEmail);
-
-      // If not authenticated and trying to access protected route
-      if (!isAuthenticated && !isAuthRoute) {
-        return Routes.login;
-      }
-
-      // If authenticated and trying to access auth route
-      if (isAuthenticated && isAuthRoute) {
-        return Routes.home;
-      }
-
-      return null;
-    },
     routes: [
       GoRoute(
         path: Routes.home,

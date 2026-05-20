@@ -63,51 +63,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final TokenManager _tokenManager;
   final AuthRepository _authRepository;
 
-  AuthNotifier(this._tokenManager, this._authRepository) : super(const AuthState()) {
-    _checkAuthStatus();
-  }
+  AuthNotifier(this._tokenManager, this._authRepository)
+      : super(const AuthState(isAuthenticated: true, isLoading: false));
 
-  /// Check if user has valid tokens on app start. If not, silently create an
-  /// anonymous account so the app is immediately usable. Anonymous mode can
-  /// be claimed later via [claimAccount]; admin can disable it system-wide
-  /// (requireRegistration = true), in which case we fall back to the login
-  /// screen and surface the error.
-  Future<void> _checkAuthStatus() async {
-    state = state.copyWith(isLoading: true);
-    try {
-      final hasTokens = await _tokenManager.hasValidTokens();
-      if (hasTokens) {
-        state = state.copyWith(isAuthenticated: true, isLoading: false);
-        return;
-      }
-      // No valid tokens — auto-provision anonymous account.
-      final result = await _authRepository.anonRegister();
-      result.fold(
-        (failure) {
-          state = state.copyWith(
-            isAuthenticated: false,
-            isLoading: false,
-            error: failure.message,
-          );
-        },
-        (authResponse) {
-          state = state.copyWith(
-            isAuthenticated: true,
-            isLoading: false,
-            userId: authResponse.userId,
-            email: authResponse.email,
-            role: authResponse.role,
-            emailVerified: false,
-          );
-        },
-      );
-    } catch (e) {
-      state = state.copyWith(
-        isAuthenticated: false,
-        isLoading: false,
-      );
-    }
-  }
+  /// Post-pivot the REST backend is gone — the app is local-only. We
+  /// initialise the auth state as "authenticated" in the constructor so
+  /// the router doesn't bounce to /login and no network call is made.
+  /// `_authRepository` and `_tokenManager` stay wired in case a future
+  /// build re-introduces account-based features (e.g., multi-device sync).
 
   /// Claim the currently-authenticated anonymous account by attaching email + password.
   Future<bool> claimAccount({
