@@ -1,0 +1,90 @@
+[
+  {
+    "symbol": "CBBL",
+    "name": "Chhimek Laghubitta Bittiya Sanstha Limited",
+    "sector": "Microfinance",
+    "status": "ACTIVE",
+    "tier": "LOW_FLOAT_CASH_PRINTER",
+    "isCurated": true
+  },
+  {
+    "symbol": "CHDC",
+    "name": "CEDB Holdings Limited",
+    "sector": null,
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  },
+  {
+    "symbol": "GVL",
+    "name": "Green Ventures Limited",
+    "sector": null,
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  },
+  {
+    "symbol": "HDL",
+    "name": "Himalayan Distillery Limited",
+    "sector": "Manufacturing",
+    "status": "ACTIVE",
+    "tier": "LOW_FLOAT_CASH_PRINTER",
+    "isCurated": true
+  },
+  {
+    "symbol": "MEN",
+    "name": "Mountain Energy Nepal Limited",
+    "sector": "Hydropower",
+    "status": "ACTIVE",
+    "tier": "LOW_FLOAT_CASH_PRINTER",
+    "isCurated": true
+  },
+  {
+    "symbol": "NLIC",
+    "name": "Nepal Life Insurance Co. Ltd.",
+    "sector": "Life Insurance",
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  },
+  {
+    "symbol": "NMFBS",
+    "name": "National Laghubitta Bittiya Sanstha Limited",
+    "sector": "Microfinance",
+    "status": "ACTIVE",
+    "tier": "LOW_FLOAT_CASH_PRINTER",
+    "isCurated": true
+  },
+  {
+    "symbol": "NTC",
+    "name": "Nepal Doorsanchar Company Limited",
+    "sector": "Others",
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  },
+  {
+    "symbol": "SAHAS",
+    "name": "Sahas Urja Limited",
+    "sector": "Hydropower",
+    "status": "ACTIVE",
+    "tier": "LOW_FLOAT_CASH_PRINTER",
+    "isCurated": true
+  },
+  {
+    "symbol": "SARBTM",
+    "name": "Sarbottam Cement Limited",
+    "sector": "Manufacturing",
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  },
+  {
+    "symbol": "SCB",
+    "name": "Standard Chartered Bank Limited",
+    "sector": "Commercial Banks",
+    "status": "ACTIVE",
+    "tier": "STANDARD",
+    "isCurated": true
+  }
+]

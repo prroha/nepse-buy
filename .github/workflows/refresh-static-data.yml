@@ -68,10 +68,13 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+    # NOTE: do NOT put NODE_ENV=production here. `npm ci` reads NODE_ENV and
+    # will skip devDependencies (tsx, prisma, typescript, …) when it's set
+    # to production. We want those installed; we just want them to *run*
+    # in production mode. Set NODE_ENV on the runtime steps below instead.
     env:
       DATABASE_URL: postgresql://nepse:nepse@localhost:5432/nepse_buy
       REDIS_URL: redis://localhost:6379
-      NODE_ENV: production
       SMOKE_INSECURE: "1"
 
     defaults:
@@ -92,29 +95,69 @@ jobs:
 
       - name: Install dependencies (workspaces, run at repo root)
         working-directory: ${{ github.workspace }}
-        run: npm ci
+        # --include=dev is explicit insurance — if NODE_ENV=production
+        # leaks into the env from anywhere (job env, runner default, an
+        # action that sets it), npm ci will otherwise omit devDependencies
+        # and tsx/prisma won't be on disk.
+        run: npm ci --include=dev
 
-      - name: Install Playwright browser (only when scraping fundamentals)
+      # Cache Chromium between runs — saves ~60s/run on scrape-all once
+      # warm. Key is bound to the lockfile so a Playwright bump invalidates.
+      - name: Cache Playwright browsers
         if: ${{ inputs.action == 'scrape-all' }}
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browser + system deps (cache miss)
+        if: ${{ inputs.action == 'scrape-all' && steps.playwright-cache.outputs.cache-hit != 'true' }}
         run: npx playwright install --with-deps chromium
 
-      - name: Generate Prisma client + migrate
+      # GHA runners are ephemeral — even when the browser binary is cached,
+      # apt-installed shared libs (libnss3, libxss1, ...) don't survive,
+      # so re-install just the system deps on a cache hit.
+      - name: Install Playwright system deps only (cache hit)
+        if: ${{ inputs.action == 'scrape-all' && steps.playwright-cache.outputs.cache-hit == 'true' }}
+        run: npx playwright install-deps chromium
+
+      # `prisma db push` instead of `migrate deploy` — the DB is ephemeral
+      # per run, so there's no migration history worth preserving. push
+      # creates tables directly from schema.prisma in one shot.
+      # --accept-data-loss bypasses the interactive prompt that would
+      # otherwise block non-interactive CI.
+      - name: Generate Prisma client + create schema
+        env:
+          NODE_ENV: production
         run: |
           npx prisma generate
-          npx prisma migrate deploy
+          npx prisma db push --accept-data-loss --skip-generate
 
+      # Call tsx via npx instead of `npm run db:seed:prod` — workspaces
+      # hoist tsx to <root>/node_modules/.bin and npm's PATH manipulation
+      # for scripts run from a workspace dir isn't consistent across
+      # versions. npx walks up the tree reliably.
       - name: Seed (curated universe + system settings)
-        run: npm run db:seed:prod
+        env:
+          NODE_ENV: production
+        run: npx tsx prisma/seed.ts
 
       - name: Scrape dividends (ShareSansar)
         if: ${{ inputs.action == 'scrape-dividends' || inputs.action == 'scrape-all' }}
+        env:
+          NODE_ENV: production
         run: npx tsx scripts/scrape-dividends.ts --${{ inputs.scope }} --force
 
       - name: Scrape prices (nepalstock.com.np)
         if: ${{ inputs.action == 'scrape-prices' || inputs.action == 'scrape-all' }}
-        run: npx tsx scripts/backfill-curated.ts --years ${{ inputs.price_years }}
+        env:
+          NODE_ENV: production
+        run: npx tsx scripts/backfill-curated.ts --scope ${{ inputs.scope }} --years ${{ inputs.price_years }}
 
       - name: Export JSON bundle
+        env:
+          NODE_ENV: production
         run: npx tsx scripts/export-static-data.ts --out ../../data
 
       - name: Show export summary
@@ -128,6 +171,13 @@ jobs:
 
       - name: Commit JSON updates
         working-directory: ${{ github.workspace }}
+        # Pass user input via env so bash quoting handles any special chars
+        # (apostrophes, $, etc.) — never interpolate ${{ inputs.* }} into
+        # a shell string directly.
+        env:
+          INPUT_COMMIT_MESSAGE: ${{ inputs.commit_message }}
+          INPUT_ACTION: ${{ inputs.action }}
+          INPUT_SCOPE: ${{ inputs.scope }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -136,9 +186,9 @@ jobs:
             echo "No JSON changes to commit."
             exit 0
           fi
-          MSG="${{ inputs.commit_message }}"
+          MSG="$INPUT_COMMIT_MESSAGE"
           if [ -z "$MSG" ]; then
-            MSG="chore(data): refresh — action=${{ inputs.action }} scope=${{ inputs.scope }}"
+            MSG="chore(data): refresh — action=$INPUT_ACTION scope=$INPUT_SCOPE"
           fi
           git commit -m "$MSG"
           git push

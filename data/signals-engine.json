@@ -1,0 +1,13 @@
+{
+  "version": "0.5.0-pe-gate-enabled",
+  "config": {
+    "ma20MinSamples": 20,
+    "limitDiscountPatient": 0.99,
+    "limitDiscountAggressive": 0.98,
+    "peGateEnabled": true,
+    "timezone": "Asia/Kathmandu",
+    "harvestThreshold": 0.3,
+    "harvestSellFraction": 0.25
+  },
+  "notes": "Default engine config — Dart consumer mirrors these values. Per-user overrides (FeeSchedule, DebtAccount, etc.) live in the device's local DB."
+}

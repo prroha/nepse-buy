@@ -1,11 +1,13 @@
 /**
- * Backfill 3-4 years of daily price history for all curated (or specified) stocks.
+ * Backfill N years of daily price history for stocks in the chosen scope.
  *
  * Usage:
- *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts                       # all curated, 4 years
- *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --years 3             # 3 years instead
- *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --symbols NABIL,SCB   # specific symbols
- *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --dry                 # no DB writes
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts                            # curated, 4 years
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --years 3                  # 3 years instead
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --scope watchlisted        # everyone's watchlist
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --scope all                # every ACTIVE stock
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --symbols NABIL,SCB        # specific symbols
+ *   SMOKE_INSECURE=1 npx tsx scripts/backfill-curated.ts --dry                      # no DB writes
  *
  * Requires Postgres reachable via DATABASE_URL unless --dry.
  */
@@ -13,26 +15,56 @@ import { createNepalStockAdapter } from "../src/market-data/nepalstock/adapter.j
 import { MarketDataIngestion } from "../src/market-data/ingestion.js";
 import { db } from "../src/lib/db.js";
 
+type Scope = "curated" | "watchlisted" | "all";
+
 interface Args {
   years: number;
   symbols: string[] | null;
+  scope: Scope;
   dry: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { years: 4, symbols: null, dry: false };
+  const a: Args = { years: 4, symbols: null, scope: "curated", dry: false };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === "--years") a.years = parseInt(argv[++i] ?? "4", 10);
     else if (v === "--symbols") a.symbols = (argv[++i] ?? "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    else if (v === "--scope") {
+      const s = argv[++i];
+      if (s !== "curated" && s !== "watchlisted" && s !== "all") {
+        console.error(`invalid --scope ${s}; expected curated|watchlisted|all`);
+        process.exit(1);
+      }
+      a.scope = s;
+    }
     else if (v === "--dry") a.dry = true;
   }
   return a;
 }
 
+async function resolveScopedSymbols(scope: Scope): Promise<string[]> {
+  switch (scope) {
+    case "curated": {
+      const rows = await db.stock.findMany({ where: { isCurated: true } });
+      return rows.map((s) => s.symbol);
+    }
+    case "watchlisted": {
+      const rows = await db.stock.findMany({
+        where: { status: "ACTIVE", watchlistItems: { some: {} } },
+      });
+      return rows.map((s) => s.symbol);
+    }
+    case "all": {
+      const rows = await db.stock.findMany({ where: { status: "ACTIVE" } });
+      return rows.map((s) => s.symbol);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  console.log(`Backfill: years=${args.years}, symbols=${args.symbols?.join(",") ?? "<curated>"}, dry=${args.dry}`);
+  console.log(`Backfill: years=${args.years}, scope=${args.scope}, symbols=${args.symbols?.join(",") ?? `<${args.scope}>`}, dry=${args.dry}`);
 
   const adapter = createNepalStockAdapter({
     userAgent: "nepse-buy/0.1-dev (backfill)",
@@ -49,12 +81,11 @@ async function main(): Promise<void> {
   let symbols = args.symbols;
   if (!symbols) {
     if (args.dry) {
-      console.warn("--dry without --symbols: cannot read curated list (no DB). Pass --symbols.");
+      console.warn("--dry without --symbols: cannot read scoped list (no DB). Pass --symbols.");
       process.exit(1);
     }
-    const curated = await db.stock.findMany({ where: { isCurated: true } });
-    symbols = curated.map((s) => s.symbol);
-    console.log(`  ${symbols.length} curated stocks: ${symbols.join(", ")}`);
+    symbols = await resolveScopedSymbols(args.scope);
+    console.log(`  ${symbols.length} ${args.scope} stocks: ${symbols.join(", ")}`);
   }
 
   const endDate = new Date();
