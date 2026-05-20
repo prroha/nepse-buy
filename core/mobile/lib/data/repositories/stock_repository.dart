@@ -180,21 +180,13 @@ class StockRepositoryImpl with BaseRepository implements StockRepository {
       final end = (start + limit).clamp(0, total);
       final pageItems = stocks.sublist(start, end);
 
-      // Enrich the page with latest price + fundamentals from the per-symbol
-      // bundle files. List view doesn't fetch dividends — too chatty.
-      final enriched = <Stock>[];
-      for (final s in pageItems) {
-        final prices = await client.getPrices(s.symbol);
-        final fund = await client.getFundamentals(s.symbol);
-        enriched.add(_toStock(
-          s,
-          p: prices.isEmpty ? null : prices.first,
-          f: fund,
-        ));
-      }
+      // List view returns metadata only — price/fundamentals enrichment is
+      // deferred to `getBySymbol()` for the detail screen. Eagerly enriching
+      // here triggered N+1 network calls (2 per symbol) on every keystroke.
+      final items = pageItems.map(_toStock).toList(growable: false);
       final totalPages = (total / limit).ceil();
       return StockSearchPage(
-        items: enriched,
+        items: items,
         page: page,
         limit: limit,
         total: total,

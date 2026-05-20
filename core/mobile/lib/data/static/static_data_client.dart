@@ -124,7 +124,9 @@ class StaticDataClient {
   /// Fetches `path` either from the cache (if `force == false`) or from the
   /// network. Network results are cached on success. When `allowMissing` is
   /// true a 404 returns null instead of throwing — used for per-symbol files
-  /// that may not exist yet for new stocks.
+  /// that may not exist yet for new stocks. The null result is itself cached
+  /// (as a tombstone) so we don't re-hit the network for every lookup until
+  /// the next forced refresh.
   Future<dynamic> _fetchJson(
     String cacheKey,
     String path, {
@@ -132,8 +134,8 @@ class StaticDataClient {
     bool allowMissing = false,
   }) async {
     if (!force) {
-      final cached = await _cache.getJson(cacheKey);
-      if (cached != null) return cached;
+      final entry = await _cache.get(cacheKey);
+      if (entry != null) return jsonDecode(entry.value);
     }
     try {
       final res = await _dio.get<String>(
@@ -152,6 +154,7 @@ class StaticDataClient {
       return decoded;
     } on DioException catch (e) {
       if (allowMissing && e.response?.statusCode == 404) {
+        await _cache.set(cacheKey, null);
         return null;
       }
       // Fall back to whatever's in the cache if we have it.

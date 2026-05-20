@@ -1,16 +1,14 @@
 import 'dart:io';
 import 'package:dartz/dartz.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants/api_constants.dart';
 import '../../core/errors/failures.dart';
-import '../../core/network/api_client.dart';
+import '../../presentation/providers/auth_provider.dart';
 import 'base_repository.dart';
 
 /// User repository provider
 final userRepositoryProvider = Provider<UserRepository>((ref) {
-  return UserRepositoryImpl(dio: ref.watch(dioProvider));
+  return UserRepositoryImpl(ref: ref);
 });
 
 /// User profile model
@@ -106,39 +104,54 @@ abstract class UserRepository {
   Future<Either<Failure, void>> deleteAvatar();
 }
 
-/// User repository implementation
+/// User repository implementation.
+///
+/// Post-v0.9 pivot: the REST backend is gone. Reads synthesize a profile
+/// from local auth state (see `auth_provider.dart`) so the Profile screen
+/// loads instantly without a network call. Writes are accepted optimistically
+/// but not persisted anywhere yet — the local "user" is just the anon shell
+/// initialised by `AuthNotifier`. Avatar upload/delete return a clear failure
+/// since there's no storage backend to talk to.
 class UserRepositoryImpl with BaseRepository implements UserRepository {
-  final Dio _dio;
+  final Ref _ref;
 
-  UserRepositoryImpl({required Dio dio}) : _dio = dio;
+  UserRepositoryImpl({required Ref ref}) : _ref = ref;
+
+  UserProfile _synthesizeProfile({String? overrideName, String? overrideEmail}) {
+    final auth = _ref.read(authProvider);
+    final now = DateTime.now();
+    return UserProfile(
+      id: auth.userId ?? 'local-user',
+      email: overrideEmail ?? auth.email ?? 'anon@nepse-buy.local',
+      name: overrideName,
+      role: auth.role ?? 'USER',
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+  }
 
   @override
   Future<Either<Failure, UserProfile>> getProfile() async {
-    return safeCall(() async {
-      final response = await _dio.get(ApiConstants.profile);
-      return UserProfile.fromJson(response.data);
-    });
+    return Right(_synthesizeProfile());
   }
 
   @override
   Future<Either<Failure, UserProfile>> updateProfile(
     UpdateProfileRequest request,
   ) async {
-    return safeCall(() async {
-      final response = await _dio.patch(
-        ApiConstants.profile,
-        data: request.toJson(),
-      );
-      return UserProfile.fromJson(response.data);
-    });
+    return Right(_synthesizeProfile(
+      overrideName: request.name,
+      overrideEmail: request.email,
+    ));
   }
 
   @override
   Future<Either<Failure, UserAvatar>> getAvatar() async {
-    return safeCall(() async {
-      final response = await _dio.get(ApiConstants.avatar);
-      return UserAvatar.fromJson(response.data);
-    });
+    final auth = _ref.read(authProvider);
+    final source = auth.email ?? '';
+    final initials = source.isNotEmpty ? source.substring(0, 1).toUpperCase() : 'U';
+    return Right(UserAvatar(url: null, initials: initials));
   }
 
   @override
@@ -146,34 +159,15 @@ class UserRepositoryImpl with BaseRepository implements UserRepository {
     File file, {
     void Function(int sent, int total)? onProgress,
   }) async {
-    return safeCall(() async {
-      final fileName = file.path.split('/').last;
-      final formData = FormData.fromMap({
-        'avatar': await MultipartFile.fromFile(
-          file.path,
-          filename: fileName,
-        ),
-      });
-
-      final response = await _dio.post(
-        ApiConstants.avatar,
-        data: formData,
-        options: Options(
-          contentType: 'multipart/form-data',
-        ),
-        onSendProgress: onProgress,
-      );
-
-      final data = response.data['data'] ?? response.data;
-      final avatar = data['avatar'] as Map<String, dynamic>;
-      return avatar['url'] as String;
-    });
+    return const Left(
+      NetworkFailure('Avatar upload is unavailable in this local-only build.'),
+    );
   }
 
   @override
   Future<Either<Failure, void>> deleteAvatar() async {
-    return safeCall(() async {
-      await _dio.delete(ApiConstants.avatar);
-    });
+    return const Left(
+      NetworkFailure('Avatar removal is unavailable in this local-only build.'),
+    );
   }
 }
