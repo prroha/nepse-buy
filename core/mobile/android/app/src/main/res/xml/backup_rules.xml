@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only back up the sqflite DB. Everything else (shared_preferences,
+  flutter_secure_storage's EncryptedSharedPreferences, plugin caches) is
+  excluded by virtue of not being listed here — Android backs up only
+  what an explicit <include> names.
+
+  flutter_secure_storage entries (PIN hash, biometric toggle) are tied to
+  the device's Android Keystore and wouldn't decrypt on a different
+  device anyway, so omitting them is intentional, not just lint-driven.
+-->
+<full-backup-content>
+  <include domain="database" path="nepse_buy.db"/>
+</full-backup-content>
