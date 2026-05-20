@@ -49,6 +49,10 @@ esac
 export DATABASE_URL="postgresql://nepse:nepse@localhost:5432/nepse_buy"
 export REDIS_URL="redis://localhost:6379"
 export SMOKE_INSECURE=1
+# Config validator still requires JWT_SECRET in NODE_ENV=production even
+# though the scrape scripts don't use it. Transparent placeholder so the
+# validator passes.
+export JWT_SECRET="ci-scrape-only-not-used-for-auth"
 
 PG_CONTAINER="nepse-pg-local"
 REDIS_CONTAINER="nepse-redis-local"

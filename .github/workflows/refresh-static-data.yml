@@ -76,6 +76,10 @@ jobs:
       DATABASE_URL: postgresql://nepse:nepse@localhost:5432/nepse_buy
       REDIS_URL: redis://localhost:6379
       SMOKE_INSECURE: "1"
+      # The scrape scripts don't actually use JWT (the REST API is dead
+      # after the v0.9 pivot), but the config validator still requires the
+      # secret in production mode. Provide a transparent placeholder.
+      JWT_SECRET: "ci-scrape-only-not-used-for-auth"
 
     defaults:
       run:
