@@ -1,234 +1,241 @@
-# Dev System
+# nepse-buy
 
-A portable, stack-aware development system for [Claude Code](https://claude.ai/claude-code) that enforces clean code, prevents hallucinations, and guides optimal architecture decisions across any project.
+Personal Android app for executing a refined DCA strategy on the Nepal Stock Exchange (NEPSE) — seasonal awareness (WEAK / NORMAL / STRONG months), valuation gates, OD-loan optimisation, FIFO cost basis + CGT, broker-SMS auto-ingest.
 
-Drop it into any repository. Run `/init`. Start building.
+No always-on backend. Everything runs locally on the phone.
 
-## What It Does
+## Architecture (v0.9 pivot)
 
-- **Detects your stack** automatically (or recommends the optimal one for new projects)
-- **Enforces code quality** — SOLID, DRY, function/file limits, error handling
-- **Prevents hallucinations** — verifies imports, dependencies, and APIs exist before using them
-- **Guides UI/UX** — Nielsen's heuristics, WCAG 2.1 AA, Storybook-first component development
-- **Documents APIs** — OpenAPI 3.1 spec generation per framework conventions
-- **Tracks architecture** — auto-indexed project structure and reusable pattern registry
-- **Audits security** — OWASP Top 10, dependency vulnerabilities, secrets detection
-- **Scaffolds boilerplate** — generates project structure, features, components, API resources
+```
+                     ┌──────────────────────┐
+                     │   GitHub Actions     │   ← you trigger manually
+                     │  "Refresh static data"│
+                     │  (workflow_dispatch) │
+                     └──────────┬───────────┘
+                                │  scrape NEPSE + ShareSansar + Mero Lagani
+                                ▼
+                     ┌──────────────────────┐
+                     │  data/*.json          │   ← committed back to repo
+                     │  (in this repo)       │
+                     └──────────┬───────────┘
+                                │  HTTPS (raw.githubusercontent.com)
+                                ▼
+                     ┌──────────────────────┐
+                     │  Flutter app (Android)│
+                     │  • sqflite cache       │
+                     │  • on-device engine    │
+                     │  • signals + portfolio │
+                     │  • broker SMS parser   │
+                     └──────────────────────┘
+```
 
-## Quick Start
+- Static (market) data lives in `data/` — fetched from GitHub raw, cached in sqflite.
+- Personal data (watchlist, trades, debt, fee schedule, settings) lives only on the phone in sqflite. Backed up via the in-app Backup & Restore screen.
+- The TypeScript backend under `core/backend/` is a **data-prep toolkit**, not a running server. It executes inside the GHA workflow only.
+
+## Repo layout
+
+```
+nepse-buy/
+├── core/
+│   ├── backend/                  TypeScript / Fastify / Prisma / Postgres
+│   │   ├── prisma/schema.prisma  Postgres schema (only used inside GHA)
+│   │   ├── scripts/
+│   │   │   ├── export-static-data.ts     dumps DB → data/*.json
+│   │   │   ├── scrape-dividends.ts       ShareSansar history
+│   │   │   ├── backfill-curated.ts       Nepal Stock OHLC
+│   │   │   └── run-pipeline.ts           in-process pipeline (dev)
+│   │   └── src/                  scrapers + signal engine + REST API (legacy)
+│   └── mobile/                   Flutter / Riverpod / sqflite
+│       ├── lib/
+│       │   ├── core/             security, theme, network, services
+│       │   ├── data/
+│       │   │   ├── local/        sqflite repositories (user-personal data)
+│       │   │   ├── static/       JSON-bundle client + models
+│       │   │   └── repositories/ screen-facing repos (local-backed)
+│       │   ├── domain/           engine (signal/fee/FIFO), broker SMS, backup
+│       │   └── presentation/     screens, widgets, providers, router
+│       └── test/                 49 unit tests (engine, parser, backup, security)
+├── data/                         JSON bundle published by GHA
+│   ├── manifest.json
+│   ├── stocks.json
+│   ├── signals-engine.json
+│   ├── prices/<SYMBOL>.json
+│   ├── fundamentals/<SYMBOL>.json
+│   └── dividends/<SYMBOL>.json
+└── .github/workflows/
+    └── refresh-static-data.yml   manual trigger to re-scrape + republish
+```
+
+## Setup (first time)
+
+### Prerequisites
+
+- **Flutter SDK** (any 3.x channel)
+- **JDK 17 or 21** — Android Gradle Plugin doesn't accept JDK 22+, including any `26-ea`. On Fedora: `sudo dnf install java-17-openjdk-devel`
+- **Android SDK** (via Android Studio or `cmdline-tools`)
+- **GitHub repo** (a fork or your own copy of this repo) so GHA can push data back
+
+### 1. Point Flutter at JDK 17
 
 ```bash
-# 1. Copy the dev-system into your project
-cp -r .dev-system/ /path/to/your-project/.dev-system/
-cp -r .claude/ /path/to/your-project/.claude/
-cp CLAUDE.md /path/to/your-project/CLAUDE.md
-
-# 2. Open your project with Claude Code
-cd /path/to/your-project
-claude
-
-# 3. Initialize
-/init
+flutter config --jdk-dir=/usr/lib/jvm/java-17-openjdk
+flutter doctor -v | grep -i java
 ```
 
-For **new projects**, `/init` runs the recommendation engine — it asks about your requirements (scale, real-time, timeline, etc.) and recommends the optimal stack with trade-off analysis.
+### 2. Generate Android platform code
 
-For **existing projects**, `/init` auto-detects your stack from manifest files and configures rules accordingly.
+The repo only contains Dart; create the Android scaffolding:
 
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/init` | Detect stack (existing) or recommend optimal stack (new project) |
-| `/plan <desc>` | Create, view, or update a multi-phase project plan |
-| `/add <desc>` | Plan and implement a feature following project patterns |
-| `/fix <desc>` | Diagnose and fix a bug with anti-hallucination safeguards |
-| `/refactor <target>` | Refactor code against Clean Code / SOLID principles |
-| `/review` | Code review: security, quality, patterns, standards |
-| `/revisit` | Self-audit for rule violations, hallucinations, missed standards |
-| `/pattern <name>` | Register a reusable pattern in the pattern registry |
-| `/ui <desc>` | Design and build a UI component (UX + a11y + Storybook) |
-| `/test` | Run project tests and report results |
-| `/scaffold <type>` | Generate boilerplate: `project`, `feature <name>`, `component <name>`, `api <resource>` |
-| `/security` | OWASP Top 10 audit, dependency scan, secrets detection |
-| `/index` | Rebuild the architecture index |
-| `/help [cmd]` | List all commands, or show details for a specific command |
-
-## Supported Stacks
-
-Auto-detection and stack-specific rules for:
-
-| Frontend | Backend | Mobile |
-|----------|---------|--------|
-| React | Node.js / Express | React Native (Expo) |
-| Next.js (App Router) | Python / FastAPI | Flutter |
-| Vue / Nuxt | Python / Django | |
-| Angular | Go | |
-| | Rust (Axum / Actix) | |
-
-Falls back to a generic ruleset for unlisted stacks.
-
-## How It Works
-
-### Auto-Optimization Per Project
-
-After `/init`, the system generates a **Project Profile** (`.dev-system/generated/PROJECT_PROFILE.md`) that optimizes itself for your specific project:
-
-- Detects **capabilities**: `hasUI`, `hasAPI`, `hasDatabase`, `hasAuth`, `hasTests`
-- Lists only the **relevant rules** — a pure API project skips `ui-ux-design.md` entirely
-- Lists only the **relevant skills** — no `/ui` for API-only, no `/security` for static sites
-- Includes **build/test/dev commands** so Claude knows how to run things
-- Specifies **rules to SKIP** — Claude never wastes tokens loading rules that don't apply
-
-Every skill reads the profile first and only loads what's needed. This means a Rust API project loads ~200 fewer tokens per skill invocation than a full-stack Next.js app, because it skips UI rules, Storybook checks, and frontend standards.
-
-### Token-Efficient Architecture
-
-- **`CLAUDE.md`** (~74 lines) — loaded every session. Contains only critical rules and command reference.
-- **Project Profile** — loaded on SessionStart. Tells Claude exactly what applies to this project.
-- **Rules** — loaded on-demand by skills, only those listed in the profile.
-- **Path-specific rules** — auto-loaded by Claude Code when you edit matching files. Zero cost until triggered.
-- **Stack files** — only the active stack(s) are loaded, not all 12.
-- **PreCompact hook** — re-injects the profile (not raw config) on context compaction.
-
-### Hooks (Automatic Lifecycle Events)
-
-| Hook | Trigger | What It Does |
-|------|---------|--------------|
-| `SessionStart` | Session begins | Auto-detects stack, shows plan status + recent activity |
-| `PreToolUse` | Before file edits | Blocks edits to `node_modules`, `.git`, `dist`, `build` |
-| `PostToolUse` | After file edits | Marks architecture index as stale |
-| `PreCompact` | Context compacting | Re-injects config, modified files, stale warnings |
-| `Stop` | Claude finishes | Reminds about stale index, suggests `/revisit` if 5+ files changed |
-
-### Path-Specific Rules (Auto-Loaded)
-
-Rules that activate automatically based on which files you're editing:
-
-| Rule | Triggers When Editing |
-|------|----------------------|
-| `ui-components.md` | Components, pages, layouts, `.stories` files |
-| `api-endpoints.md` | Routes, handlers, controllers, views |
-| `database-models.md` | Models, repositories, migrations, schemas |
-| `test-files.md` | Test files (`*.test.ts`, `*.spec.ts`, `*_test.go`, etc.) |
-
-### On-Demand Rules
-
-Detailed rule files loaded by specific commands:
-
-| Rule | What It Covers | Loaded By |
-|------|---------------|-----------|
-| `anti-hallucination.md` | Prevents fabricating APIs, files, dependencies | `/fix`, `/review`, `/revisit` |
-| `clean-code.md` | SOLID, DRY, naming, function/file limits | `/refactor`, `/review`, `/revisit` |
-| `coding-standards.md` | Language-specific standards, API design, OpenAPI | `/add`, `/review`, `/revisit` |
-| `ui-ux-design.md` | Nielsen's heuristics, WCAG 2.1 AA, Storybook | `/ui`, `/review`, `/revisit` |
-| `stack-recommendations.md` | Tech stack decision matrix | `/init` (new projects only) |
-
-## Project Structure
-
-```
-your-project/
-├── CLAUDE.md                          # Session instructions (66 lines, always loaded)
-├── .claude/
-│   ├── settings.json                  # Hooks configuration
-│   ├── settings.local.json            # Local permissions (not committed)
-│   ├── skills/                        # 15 command skills
-│   │   ├── init/SKILL.md
-│   │   ├── plan/SKILL.md
-│   │   ├── add/SKILL.md
-│   │   ├── fix/SKILL.md
-│   │   ├── refactor/SKILL.md
-│   │   ├── review/SKILL.md
-│   │   ├── revisit/SKILL.md
-│   │   ├── pattern/SKILL.md
-│   │   ├── ui/SKILL.md
-│   │   ├── test/SKILL.md
-│   │   ├── scaffold/SKILL.md
-│   │   ├── security/SKILL.md
-│   │   ├── index/SKILL.md
-│   │   └── help/SKILL.md
-│   └── rules/                         # Path-specific rules (auto-loaded)
-│       ├── ui-components.md
-│       ├── api-endpoints.md
-│       ├── database-models.md
-│       └── test-files.md
-├── .dev-system/
-│   ├── config.json                    # Stack configuration (created by /init)
-│   ├── rules/                         # On-demand rule files
-│   │   ├── anti-hallucination.md
-│   │   ├── clean-code.md
-│   │   ├── coding-standards.md
-│   │   ├── ui-ux-design.md
-│   │   └── stack-recommendations.md
-│   ├── stacks/                        # Stack-specific rules (12 stacks)
-│   │   ├── react.md
-│   │   ├── nextjs.md
-│   │   ├── vue.md
-│   │   ├── angular.md
-│   │   ├── node-express.md
-│   │   ├── python-fastapi.md
-│   │   ├── python-django.md
-│   │   ├── go.md
-│   │   ├── rust.md
-│   │   ├── react-native.md
-│   │   ├── flutter.md
-│   │   └── generic.md
-│   ├── templates/                     # Architecture templates
-│   │   └── project-types/
-│   │       ├── web-app.md
-│   │       ├── api.md
-│   │       ├── mobile-app.md
-│   │       └── rust-api.md
-│   ├── scripts/                       # Hook scripts
-│   │   ├── detect-stack.sh
-│   │   ├── validate-edit.sh
-│   │   ├── post-edit.sh
-│   │   ├── pre-compact.sh
-│   │   ├── stop-check.sh
-│   │   ├── update-architecture-index.sh
-│   │   └── health-check.sh
-│   └── generated/                     # Auto-generated (by /init, /index, /plan)
-│       ├── ARCHITECTURE.md
-│       ├── PATTERNS.md
-│       ├── PLAN.md                    # Multi-phase project plan (created by /plan)
-│       ├── ACTIVITY.md                # Rolling activity log (auto-updated by skills)
-│       └── .stale                     # Marker: index needs rebuild
+```bash
+cd core/mobile
+flutter create --platforms=android --org=ai.act3 --project-name=nepse_buy .
 ```
 
-## Key Design Principles
+Edit `core/mobile/android/app/src/main/AndroidManifest.xml` and add inside `<manifest>` (above `<application>`):
 
-### Anti-Hallucination First
-Every skill verifies before acting. Imports are checked with Glob. Dependencies are confirmed in manifests. APIs are validated against route definitions. If something can't be verified, Claude flags it instead of guessing.
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+<uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+<uses-permission android:name="android.permission.READ_SMS"/>
+<uses-permission android:name="android.permission.RECEIVE_SMS"/>
+<uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+```
 
-### Token Efficiency
-CLAUDE.md stays under 100 lines. Rules load on-demand. Path-specific rules auto-load only when relevant files are touched. The PreCompact hook preserves critical context during compaction. No rule content is duplicated across skills.
+Change `<application … >` to enable system backup:
 
-### Stack-Aware
-The system adapts its guidance to your specific framework. A Next.js project gets App Router patterns, Server Components rules, and `@storybook/nextjs` setup. A FastAPI project gets Pydantic validation, dependency injection, and auto-generated OpenAPI docs. Each stack gets idiomatic patterns, not generic advice.
+```xml
+<application
+    android:label="nepse_buy"
+    android:icon="@mipmap/ic_launcher"
+    android:allowBackup="true"
+    android:fullBackupContent="@xml/backup_rules"
+    android:dataExtractionRules="@xml/backup_rules">
+```
 
-### Reuse Over Reinvent
-The pattern registry (`PATTERNS.md`) tracks reusable abstractions. Every skill checks it before creating new code. `/pattern` registers new patterns. The architecture index gives Claude a map of the codebase without reading every file.
+Create `core/mobile/android/app/src/main/res/xml/backup_rules.xml`:
 
-## Extending the System
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+  <include domain="database" path="nepse_buy.db"/>
+  <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+</full-backup-content>
+```
 
-### Add a New Stack
+Set `minSdkVersion 23` in `core/mobile/android/app/build.gradle` (required for `local_auth` + `flutter_local_notifications`).
 
-Create `.dev-system/stacks/<name>.md` with framework-specific rules. Update `detect-stack.sh` to auto-detect the new stack's manifest files.
+### 3. Populate the JSON bundle
 
-### Add a New Skill
+Push this repo to GitHub (or use your fork). Then on GitHub:
 
-Create `.claude/skills/<name>/SKILL.md` with frontmatter (`name`, `description`, `allowed-tools`) and workflow steps. Add it to the commands table in `CLAUDE.md`, `/help`, and `health-check.sh`.
+1. Open **Actions** → **Refresh static data** → **Run workflow**
+2. Pick `action: scrape-all`, `scope: curated`
+3. Wait ~10 minutes (Playwright cold start + ShareSansar + Mero Lagani + NEPSE price backfill)
+4. The workflow commits `data/*.json` back to the repo
 
-### Add a Path-Specific Rule
+Your raw-content URL is `https://raw.githubusercontent.com/<owner>/<repo>/main/data`.
 
-Create `.claude/rules/<name>.md` with a `paths` frontmatter array and the rules to apply when those files are edited.
+### 4. Build and install the APK
 
-### Add a Hook
+From `core/mobile/`:
 
-Edit `.claude/settings.json` to add new hooks at lifecycle events. Currently configured: `SessionStart`, `Stop`, `PreToolUse`, `PostToolUse`, `PreCompact`. Other available events include `PostCompact`, `Notification`, `SubagentStart`, `SubagentStop`, and more.
+```bash
+flutter pub get
 
-## Requirements
+flutter build apk --release --dart-define=STATIC_DATA_URL=https://raw.githubusercontent.com/<owner>/<repo>/main/data
+```
 
-- [Claude Code CLI](https://claude.ai/claude-code) installed and configured
-- Bash shell (for hook scripts)
-- Git (for change tracking and architecture indexing)
+APK lands at `build/app/outputs/flutter-apk/app-release.apk`.
+
+```bash
+# USB-connected phone in dev mode:
+adb install build/app/outputs/flutter-apk/app-release.apk
+
+# Or transfer the .apk via Drive/USB and tap to install.
+# Allow "install from unknown sources" the first time.
+```
+
+For iterative dev: `flutter run --dart-define=STATIC_DATA_URL=...` with a phone or emulator attached.
+
+### 5. First launch
+
+1. Allow notifications when prompted (skippable — Signals still works).
+2. **Settings → Security** → enable App Lock with a 4–8 digit PIN; toggle biometric if available.
+3. **Settings → Backup & Restore** → export the (empty) bundle once to verify the share sheet works.
+4. **Portfolio → Broker messages → sync** → grant SMS permission and let it ingest any past broker SMSes.
+
+## Day-to-day
+
+| Action | When | What it does |
+|---|---|---|
+| Open app | Daily | Engine evaluates each watchlisted symbol; Signals tab lists BUY / HOLD_FUNDS / WAIT / HARVEST |
+| **Tap "Refresh"** in freshness banner | Cache > 7 days old | Re-downloads the existing JSON bundle from GitHub (seconds) |
+| **Trigger GHA workflow** | Want new prices / dividends | Re-scrapes upstream + republishes JSON bundle (~10 min) |
+| **Portfolio → Broker messages → sync** | After you trade on your TMS | Reads new SMSes, parses Naasa-style `(SYMBOL N kitta @ PRICE)` tuples, queues for approval |
+| **Settings → Backup & Restore → Export** | Before reinstalling / new phone | Bundles watchlist + trades + debt + fees into JSON, opens share sheet (save to Drive) |
+
+## Backend (only for development / new scrape sources)
+
+Day-to-day you don't need this — it runs inside GitHub Actions. But for adding a new scrape source or debugging the engine:
+
+```bash
+cd core/backend
+docker compose -f ../../docker-compose.dev.yml up -d postgres redis
+npm install
+npx prisma migrate dev
+npm run db:seed:prod
+
+# Smoke a scraper
+SMOKE_INSECURE=1 npx tsx scripts/scrape-dividends.ts --curated --force
+
+# Export DB → JSON
+npx tsx scripts/export-static-data.ts --out ../../data
+```
+
+The TS engine and the Dart engine are kept in lockstep — see `core/backend/src/signals/` and `core/mobile/lib/domain/engine/`. Rationale strings are byte-equivalent so we can compare server-rendered evaluations against on-device ones during regression testing.
+
+## Tests
+
+```bash
+# Mobile (49 tests — engine + parser + backup + security)
+cd core/mobile && flutter test
+
+# Backend (mix of unit + integration; integration needs Postgres on :5433)
+cd core/backend && npm test
+```
+
+The mobile test suite is hermetic; backend integration tests fail without `docker compose up postgres` (a pre-existing condition).
+
+## Common gotchas
+
+- **`flutter build apk` fails with cryptic `26-ea`** → JDK 26-EA is installed. Switch to JDK 17 with `flutter config --jdk-dir=/usr/lib/jvm/java-17-openjdk`.
+- **`flutter create` warning about existing files** → safe to accept; the existing Dart code under `lib/` is untouched. Run `git status` afterwards and revert anything unexpected.
+- **`READ_SMS` permission** → Google Play Store disallows for unrelated apps. Since this is sideloaded for personal use, that's fine.
+- **Biometric prompt no-ops on emulator** → expected; biometrics only work on real hardware. PIN is always the fallback.
+- **GHA workflow can't push to a protected `main` branch** → either remove the protection on `data/` or change the workflow's commit target to a `data` branch and update `STATIC_DATA_URL` to use that branch.
+- **NEPSE WASM scrape fails the first time** → TLS-fingerprint sensitive. Re-run the workflow; we have jitter + 429 abort but no challenge-rotation logic yet.
+
+## Configuration
+
+Build-time flags via `--dart-define=KEY=VALUE`:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `STATIC_DATA_URL` | `https://raw.githubusercontent.com/act3ai/nepse-buy/main/data` | Where the app fetches JSON from |
+| `API_URL` | `http://10.0.2.2:8000/api/v1` | Legacy REST endpoint (unused after pivot; safe to ignore) |
+
+Runtime, in the app:
+
+| Setting | Where | Default |
+|---|---|---|
+| PIN, biometric, auto-lock window | Settings → Security | None / 60s window |
+| DCA weekly NPR (sizing helper) | `user_settings.dca_weekly_npr` row | 25 000 |
+
+## Project status
+
+- v0.9: static-data pivot complete (5 phases — skip-aware scraping, JSON exporter, Dart engine port, backup/restore, app lock)
+- v0.10: freshness banner, local notifications, signal history, sector + price charts, one-tap trade entry, broker SMS auto-ingest with Naasa-format multi-trade fan-out + BAmt cross-check
+- 49 Dart tests passing; backend test suite has pre-existing auth-integration failures unrelated to the pivot
