@@ -1,4 +1,4 @@
-package ai.act3.nepse_buy
+package com.prroha.nepsebuy
 
 import io.flutter.embedding.android.FlutterActivity
 

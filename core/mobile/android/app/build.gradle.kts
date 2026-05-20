@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "ai.act3.nepse_buy"
+    namespace = "com.prroha.nepsebuy"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ai.act3.nepse_buy"
+        applicationId = "com.prroha.nepsebuy"
         // local_auth + flutter_local_notifications both require API 23+;
         // override Flutter's default (which is currently 21).
         minSdk = flutter.minSdkVersion
